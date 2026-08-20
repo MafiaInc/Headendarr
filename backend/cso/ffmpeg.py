@@ -121,6 +121,45 @@ def detect_vaapi_device_fingerprint(device_path: str | None = None) -> str:
     return hashlib.md5(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
+def detect_nvidia_device() -> bool:
+    # The NVIDIA container runtime maps the character devices in; their presence is the
+    # most reliable in-container signal that an NVIDIA GPU (and NVENC) is usable.
+    if any(Path(candidate).exists() for candidate in ("/dev/nvidia0", "/dev/nvidiactl")):
+        return True
+    visible = clean_text(os.environ.get("NVIDIA_VISIBLE_DEVICES")).lower()
+    return bool(visible) and visible not in {"void", "none"}
+
+
+def resolve_hwaccel_backend() -> str | None:
+    """Return the hardware transcode backend to use: 'vaapi', 'nvenc', or None (software).
+
+    Auto-detects by default and prefers an explicit VAAPI render node (preserving prior
+    behaviour on Intel/AMD hosts), then falls back to NVIDIA/NVENC. Override with the
+    TIC_HWACCEL_BACKEND environment variable (vaapi|nvenc|none|auto).
+    """
+    override = clean_key(os.environ.get("TIC_HWACCEL_BACKEND"))
+    if override in {"vaapi", "nvenc"}:
+        return override
+    if override in {"none", "off", "disabled", "software"}:
+        return None
+    if detect_vaapi_device_path():
+        return "vaapi"
+    if detect_nvidia_device():
+        return "nvenc"
+    return None
+
+
+def detect_gpu_fingerprint() -> str:
+    """Backend-aware GPU fingerprint used to scope cached hwaccel failures."""
+    backend = resolve_hwaccel_backend()
+    if backend == "vaapi":
+        return detect_vaapi_device_fingerprint()
+    if backend == "nvenc":
+        marker = clean_text(os.environ.get("NVIDIA_VISIBLE_DEVICES")) or "all"
+        return hashlib.md5(f"nvenc:{marker}".encode("utf-8"), usedforsecurity=False).hexdigest()
+    return ""
+
+
 def _policy_uses_hw_video_pipeline(policy: dict[str, Any] | None) -> bool:
     data = dict(policy or {})
     return bool(data.get("hwaccel")) and bool(clean_key(data.get("video_codec")))
@@ -136,7 +175,7 @@ def _build_hwaccel_failure_source_identity(source_identity: str | None) -> str:
 def _build_hwaccel_failure_cache_key(policy: dict[str, Any] | None, source_identity: str | None) -> str:
     if not _policy_uses_hw_video_pipeline(policy):
         return ""
-    gpu_fingerprint = detect_vaapi_device_fingerprint()
+    gpu_fingerprint = detect_gpu_fingerprint()
     if not gpu_fingerprint:
         return ""
     hashed_source_identity = _build_hwaccel_failure_source_identity(source_identity)
@@ -169,6 +208,19 @@ def _is_cacheable_hwaccel_failure(failure_reason: str) -> bool:
             "invalid output format vaapi",
             "no support for codec",
             "cannot allocate memory",
+            # NVENC / CUDA backend
+            "nvenc",
+            "cuda",
+            "cuvid",
+            "nvdec",
+            "scale_cuda",
+            "yadif_cuda",
+            "bwdif_cuda",
+            "hwupload_cuda",
+            "no capable devices",
+            "cannot load libcuda",
+            "openencodesessionex failed",
+            "generic error in an external library",
         )
     )
 
@@ -288,11 +340,12 @@ def log_hwaccel_failure(policy: dict[str, Any] | None, context: str, reason: str
         return
     logger.error(
         "CSO hardware-accelerated encode failed context=%s video_codec=%s reason=%s. "
-        "Hardware acceleration is enabled for this profile but the VAAPI encode path failed. "
+        "Hardware acceleration is enabled for this profile but the %s encode path failed. "
         "Disable hardware acceleration for this codec/profile if the issue persists.",
         context,
         clean_key((policy or {}).get("video_codec")) or "",
         reason or "unknown",
+        resolve_hwaccel_backend() or "hardware",
     )
 
 
@@ -429,6 +482,36 @@ class CsoFfmpegCommandBuilder:
             return f"scale_vaapi=w={width_value}:h={height_value}"
         return f"scale_vaapi=w={width_value}:h=-2"
 
+    @staticmethod
+    def nvenc_encoder_for_codec(video_codec: str) -> str:
+        codec = video_codec or ""
+        return {
+            "h264": "h264_nvenc",
+            "h265": "hevc_nvenc",
+            "av1": "av1_nvenc",
+        }.get(codec, "h264_nvenc")
+
+    @staticmethod
+    def nvenc_default_cq(video_codec: str, target_width: int = 0) -> int:
+        codec = clean_key(video_codec)
+        if codec == "h265":
+            return 25 if int(target_width or 0) > 0 else 23
+        if codec == "av1":
+            return 32 if int(target_width or 0) > 0 else 30
+        return 23 if int(target_width or 0) > 0 else 21
+
+    def _cuda_scale_filter(self, target_width: int, target_height: int = 0) -> str:
+        width_value = max(0, int(target_width or 0))
+        height_value = max(0, int(target_height or 0))
+        if width_value > 0 and height_value > 0:
+            return f"scale_cuda=w={width_value}:h={height_value}"
+        return f"scale_cuda=w={width_value}:h=-2"
+
+    @staticmethod
+    def _cuda_deinterlace_filter() -> str:
+        # Only deinterlace frames marked interlaced so progressive sources pass through untouched.
+        return "bwdif_cuda=mode=send_frame:parity=auto:deint=interlaced"
+
     def _input_hwaccel_args(self, policy=None) -> list[str]:
         effective_policy = dict(policy or self.policy or {})
         if not _policy_uses_hw_video_pipeline(effective_policy):
@@ -437,19 +520,31 @@ class CsoFfmpegCommandBuilder:
             return []
         video_codec = clean_key(self.source_probe.get("video_codec"))
         if video_codec == "mpeg4":
-            # VAAPI hardware decode for mpeg4 is often unsupported or unreliable.
+            # Hardware decode for mpeg4 is often unsupported or unreliable (VAAPI and NVDEC).
             return []
-        vaapi_device = detect_vaapi_device_path()
-        if not vaapi_device:
-            return []
-        return [
-            "-hwaccel",
-            "vaapi",
-            "-hwaccel_output_format",
-            "vaapi",
-            "-hwaccel_device",
-            vaapi_device,
-        ]
+        backend = resolve_hwaccel_backend()
+        if backend == "vaapi":
+            vaapi_device = detect_vaapi_device_path()
+            if not vaapi_device:
+                return []
+            return [
+                "-hwaccel",
+                "vaapi",
+                "-hwaccel_output_format",
+                "vaapi",
+                "-hwaccel_device",
+                vaapi_device,
+            ]
+        if backend == "nvenc":
+            # Decode on the GPU and keep frames in CUDA memory so scale/deinterlace and the
+            # NVENC encoder can run without a device round-trip.
+            return [
+                "-hwaccel",
+                "cuda",
+                "-hwaccel_output_format",
+                "cuda",
+            ]
+        return []
 
     @staticmethod
     def _build_slate_media_hint(media_hint):
@@ -614,24 +709,30 @@ class CsoFfmpegCommandBuilder:
         hwaccel_requested = bool(effective_policy["hwaccel"]) and bool(video_codec)
         hardware_decode = bool(effective_policy.get("hardware_decode", True))
         deinterlace = bool(effective_policy["deinterlace"]) and bool(video_codec)
-        vaapi_device = detect_vaapi_device_path() if hwaccel_requested else None
-        use_hw_encode = bool(vaapi_device) and clean_key(video_codec) in {"h264", "h265", "av1"}
-        if hwaccel_requested and not vaapi_device:
+        hw_backend = resolve_hwaccel_backend() if hwaccel_requested else None
+        vaapi_device = detect_vaapi_device_path() if hw_backend == "vaapi" else None
+        use_hw_encode = clean_key(video_codec) in {"h264", "h265", "av1"} and (
+            (hw_backend == "vaapi" and bool(vaapi_device)) or hw_backend == "nvenc"
+        )
+        if hwaccel_requested and hw_backend is None:
             logger.info(
-                "CSO hwaccel requested but no VAAPI device is available; falling back to software encode video_codec=%s container=%s",
+                "CSO hwaccel requested but no supported GPU (VAAPI/NVENC) is available; "
+                "falling back to software encode video_codec=%s container=%s",
                 video_codec,
                 container or "",
             )
         elif hwaccel_requested and not use_hw_encode:
             logger.info(
-                "CSO hwaccel requested for a codec without VAAPI encode support in TIC; falling back to software encode video_codec=%s container=%s",
+                "CSO hwaccel requested for a codec without %s encode support in TIC; "
+                "falling back to software encode video_codec=%s container=%s",
+                hw_backend,
                 video_codec,
                 container or "",
             )
 
         if video_codec:
             filters = []
-            if use_hw_encode:
+            if use_hw_encode and hw_backend == "vaapi":
                 encoder = self.vaapi_encoder_for_codec(video_codec)
                 if hardware_decode:
                     if deinterlace:
@@ -658,6 +759,43 @@ class CsoFfmpegCommandBuilder:
                     "CQP",
                     "-qp",
                     str(self.vaapi_default_qp(video_codec, target_width)),
+                ]
+                if clean_key(video_codec) == "h264":
+                    command += ["-profile:v", "high", "-level", "4.1"]
+            elif use_hw_encode and hw_backend == "nvenc":
+                encoder = self.nvenc_encoder_for_codec(video_codec)
+                if hardware_decode:
+                    # Frames are already in CUDA memory (see _input_hwaccel_args); keep the
+                    # scale/deinterlace work on the GPU so nothing round-trips to system RAM.
+                    if deinterlace:
+                        filters.append(self._cuda_deinterlace_filter())
+                    if target_width > 0:
+                        filters.append(self._cuda_scale_filter(target_width, target_height))
+                else:
+                    # Software decode -> NVENC encode. Unlike VAAPI, NVENC accepts
+                    # system-memory frames directly, so no hwupload is required.
+                    if deinterlace:
+                        filters.append(self._software_deinterlace_filter())
+                    if target_width > 0:
+                        filters.append(self._software_scale_filter(target_width, target_height))
+                    if deinterlace or target_width > 0:
+                        filters.append("setsar=1")
+                    filters.append(f"format={output_pixel_format}")
+                if filters:
+                    command += ["-vf", ",".join(filters)]
+                command += [
+                    "-c:v",
+                    encoder,
+                    "-preset",
+                    "p4",
+                    "-tune",
+                    "ll",
+                    "-rc",
+                    "vbr",
+                    "-cq",
+                    str(self.nvenc_default_cq(video_codec, target_width)),
+                    "-b:v",
+                    "0",
                 ]
                 if clean_key(video_codec) == "h264":
                     command += ["-profile:v", "high", "-level", "4.1"]

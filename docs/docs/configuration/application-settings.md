@@ -37,7 +37,7 @@ These settings define how Headendarr interacts with external services and how cl
   - Disabled: original source logo URLs are emitted in channel payloads, XMLTV, and generated playlists. Consider using a source like [github.com/tv-logo/tv-logos](https://github.com/tv-logo/tv-logos/) for logos.
 - **Stream Profiles table**:
   - Enable/disable each supported `profile` value exposed on stream and playlist URLs.
-  - Configure per-profile hardware acceleration preference (`HW Accel`, VAAPI encode path) for transcoding profiles.
+  - Configure per-profile hardware acceleration preference (`HW Accel`) for transcoding profiles. The hardware backend is auto-detected: a VAAPI render node (`/dev/dri/renderD*`, Intel/AMD) is preferred, otherwise NVIDIA NVENC is used when NVIDIA devices are present. Set the `TIC_HWACCEL_BACKEND` environment variable to `vaapi`, `nvenc`, or `none` to override auto-detection. For NVENC, run the container with the NVIDIA runtime (e.g. `--gpus all` or a `deploy.resources` NVIDIA reservation).
   - Configure per-profile `Deinterlace` for transcoding profiles.
   - Profiles cover remux targets (`mpegts`, `matroska`, `mp4`, `webm`, `hls`), audio-only transforms, and full video/audio transcodes including H.264, H.265, VP8, and AV1 variants.
   - `Deinterlace` adds a small processing overhead when enabled.
