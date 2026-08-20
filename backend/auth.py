@@ -389,7 +389,7 @@ async def get_user_from_token():
                 UserSession.revoked == False,
                 or_(UserSession.expires_at == None, UserSession.expires_at >= now),
             )
-            .options(selectinload(User.roles))
+            .options(selectinload(User.roles), selectinload(User.allowed_channel_tags))
         )
         row = result.first()
         user = row[0] if row else None

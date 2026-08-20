@@ -21,6 +21,7 @@ from backend.users import (
     change_user_password,
     get_user_by_id,
     set_user_tvh_sync_status,
+    set_user_channel_tags,
     user_has_admin_role,
     user_timeshift_enabled,
     delete_user,
@@ -56,6 +57,8 @@ def _serialize_user(user: User):
         "timeshift_enabled": user_timeshift_enabled(user),
         "vod_access_mode": vod_access_mode,
         "vod_generate_strm_files": bool(user.vod_generate_strm_files),
+        # Channel groups (tags) this user may see. Empty == all channels (admins see all).
+        "allowed_channel_tags": sorted(tag.name for tag in (user.allowed_channel_tags or [])),
     }
 
 
@@ -76,7 +79,9 @@ async def _queue_user_sync(user_id: int, username: str):
 @admin_auth_required
 async def list_users():
     async with Session() as session:
-        result = await session.execute(select(User).options(selectinload(User.roles)))
+        result = await session.execute(
+            select(User).options(selectinload(User.roles), selectinload(User.allowed_channel_tags))
+        )
         users = result.scalars().all()
     return jsonify({"success": True, "data": [_serialize_user(u) for u in users]})
 
@@ -110,6 +115,8 @@ async def create_user_route():
         vod_access_mode=vod_access_mode,
         vod_generate_strm_files=vod_generate_strm_files,
     )
+    if "allowed_channel_tags" in data:
+        await set_user_channel_tags(user.id, data.get("allowed_channel_tags") or [])
     user = await get_user_by_id(user.id)
     await _queue_user_sync(user.id, user.username)
     await queue_all_vod_category_strm_syncs(current_app.config["APP_CONFIG"])
@@ -142,6 +149,8 @@ async def update_user_route(user_id):
         vod_access_mode=vod_access_mode,
         vod_generate_strm_files=vod_generate_strm_files,
     )
+    if "allowed_channel_tags" in data:
+        await set_user_channel_tags(user_id, data.get("allowed_channel_tags") or [])
     user = await get_user_by_id(user_id)
     if not user:
         return jsonify({"success": False, "message": "User not found"}), 404

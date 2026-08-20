@@ -634,6 +634,15 @@ user_roles_association_table = Table(
     Column("role_id", Integer, ForeignKey("roles.id"), nullable=False),
 )
 
+# Per-user channel access: the channel groups (tags) a user is allowed to see. A user
+# with no rows here is unrestricted (sees all channels); see stream_access helpers.
+user_channel_tags_association_table = Table(
+    "user_channel_tags",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("channel_tag_id", Integer, ForeignKey("channel_tags.id", ondelete="CASCADE"), nullable=False),
+)
+
 
 class User(Base):
     __tablename__ = "users"
@@ -665,6 +674,8 @@ class User(Base):
     last_stream_key_used_at = Column(DateTime, nullable=True)
 
     roles = relationship("Role", secondary=user_roles_association_table, back_populates="users")
+    # Channel groups (tags) this user may see. Empty == unrestricted (sees all channels).
+    allowed_channel_tags = relationship("ChannelTag", secondary=user_channel_tags_association_table)
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     stream_audits = relationship("StreamAuditLog", back_populates="user", cascade="all, delete-orphan")
 

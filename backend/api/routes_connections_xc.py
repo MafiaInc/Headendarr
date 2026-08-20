@@ -21,6 +21,11 @@ from backend.auth import (
     record_failed_stream_auth,
 )
 from backend.channels import read_config_all_channels
+from backend.channel_access import (
+    allowed_channel_tag_names_for_username,
+    channel_allowed,
+    filter_channels_for_access,
+)
 from backend.epgs import build_channel_logo_output_url, load_preferred_epg_channel_row
 from backend.models import EpgChannelProgrammes, PlaylistStreams, Session, XcAccount
 from backend.cso import (
@@ -652,18 +657,26 @@ async def xc_player_api():
 
     action = request.args.get("action")
     channels = await _get_enabled_channels()
-    categories = xc_cache.get("xc_categories")
-    name_to_id = xc_cache.get("xc_category_map")
-    if not categories or not name_to_id:
+    allowed_tags = await allowed_channel_tag_names_for_username(getattr(user, "username", None))
+    if allowed_tags is not None:
+        # Restricted user: derive categories from only the channels they may see, and never
+        # share these per-user results through the global cache.
+        channels = filter_channels_for_access(channels, allowed_tags)
         categories, name_to_id = _build_category_map(channels)
-        xc_cache.set("xc_categories", categories, ttl_seconds=60)
-        xc_cache.set("xc_category_map", name_to_id, ttl_seconds=60)
+    else:
+        categories = xc_cache.get("xc_categories")
+        name_to_id = xc_cache.get("xc_category_map")
+        if not categories or not name_to_id:
+            categories, name_to_id = _build_category_map(channels)
+            xc_cache.set("xc_categories", categories, ttl_seconds=60)
+            xc_cache.set("xc_category_map", name_to_id, ttl_seconds=60)
     xc_cache.set("xc_max_connections", await _get_max_connections(), ttl_seconds=60)
 
     if action == "get_live_categories":
         return jsonify(categories)
     if action == "get_live_streams":
-        cache_key = f"xc_live_streams:{int(_xc_timeshift_enabled(user))}"
+        restriction_marker = "all" if allowed_tags is None else getattr(user, "username", "")
+        cache_key = f"xc_live_streams:{int(_xc_timeshift_enabled(user))}:{restriction_marker}"
         cached_streams = xc_cache.get(cache_key)
         if cached_streams:
             return jsonify(cached_streams)
@@ -695,7 +708,7 @@ async def xc_player_api():
 
         channel_map = await _get_channel_map()
         channel = channel_map.get(stream_id)
-        if not channel:
+        if not channel or not channel_allowed(channel, allowed_tags):
             return jsonify({"epg_listings": []})
 
         include_archive = False
@@ -780,6 +793,9 @@ async def xc_stream(username: str, password: str, stream_id: str, ext: str | Non
     channel = channel_map.get(str(stream_id))
     if not channel:
         return jsonify({"error": "Not found"}), 404
+    allowed_tags = await allowed_channel_tag_names_for_username(user.username)
+    if not channel_allowed(channel, allowed_tags):
+        return jsonify({"error": "Not found"}), 404
 
     target, _, _ = await resolve_channel_stream_url(
         config=current_app.config["APP_CONFIG"],
@@ -813,6 +829,9 @@ async def _xc_timeshift_response(
     channel_map = await _get_channel_map()
     channel = channel_map.get(str(stream_id))
     if not channel:
+        return jsonify({"error": "Not found"}), 404
+    allowed_tags = await allowed_channel_tag_names_for_username(user.username)
+    if not channel_allowed(channel, allowed_tags):
         return jsonify({"error": "Not found"}), 404
 
     archive_source = await _resolve_xc_archive_source(channel)

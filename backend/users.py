@@ -5,11 +5,11 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from backend.models import Session, User, Role
+from backend.models import Session, User, Role, ChannelTag
 from backend.oidc import OidcConfig, extract_claim_value, map_roles_from_claims, resolve_username_from_claims
 from backend.security import hash_password, verify_password, needs_rehash, generate_stream_key
 from backend.dvr_profiles import normalize_retention_policy
-from backend.utils import clean_key, utc_now_naive
+from backend.utils import clean_key, clean_text, utc_now_naive
 
 
 DEFAULT_ROLES = ("admin", "streamer")
@@ -72,7 +72,11 @@ async def get_user_by_username(username: str):
 
 async def get_user_by_id(user_id: int):
     async with Session() as session:
-        result = await session.execute(select(User).where(User.id == user_id).options(selectinload(User.roles)))
+        result = await session.execute(
+            select(User)
+            .where(User.id == user_id)
+            .options(selectinload(User.roles), selectinload(User.allowed_channel_tags))
+        )
         return result.scalars().first()
 
 
@@ -82,6 +86,28 @@ async def get_user_by_stream_key(stream_key: str):
             select(User).where(User.streaming_key == stream_key).options(selectinload(User.roles))
         )
         return result.scalars().first()
+
+
+async def set_user_channel_tags(user_id: int, tag_names):
+    """Replace the set of channel groups (tags) a user is allowed to see.
+
+    An empty list clears all restrictions (the user then sees every channel). Unknown
+    tag names are ignored.
+    """
+    names = {clean_text(name) for name in (tag_names or []) if clean_text(name)}
+    async with Session() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(User).where(User.id == user_id).options(selectinload(User.allowed_channel_tags))
+            )
+            user = result.scalars().first()
+            if not user:
+                return
+            if not names:
+                user.allowed_channel_tags = []
+                return
+            tag_result = await session.execute(select(ChannelTag).where(ChannelTag.name.in_(names)))
+            user.allowed_channel_tags = list(tag_result.scalars().all())
 
 
 async def create_user(username: str, password: str, role_names=None):
