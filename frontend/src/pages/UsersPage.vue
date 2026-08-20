@@ -198,6 +198,16 @@
             description="Enable `.strm` library export generation for this user when VOD categories have `.strm` generation enabled."
             :disable="!form.roles.includes('admin') && form.vod_access_mode === 'none'"
           />
+          <TicSelectInput
+            v-if="!form.roles.includes('admin')"
+            v-model="form.allowed_channel_tags"
+            label="Channel Groups"
+            description="Restrict this user to channels in the selected groups. Leave empty to allow every channel."
+            :options="channelGroupOptions"
+            :multiple="true"
+            :clearable="true"
+            :behavior="$q.screen.lt.md ? 'dialog' : 'menu'"
+          />
           <q-banner
             v-if="form.roles.includes('admin')"
             rounded
@@ -341,6 +351,16 @@
               description="Enable `.strm` library export generation for this user when VOD categories have `.strm` generation enabled."
               :disable="!isAdminUser(editUser) && form.vod_access_mode === 'none'"
             />
+            <TicSelectInput
+              v-if="!isAdminUser(editUser)"
+              v-model="form.allowed_channel_tags"
+              label="Channel Groups"
+              description="Restrict this user to channels in the selected groups. Leave empty to allow every channel."
+              :options="channelGroupOptions"
+              :multiple="true"
+              :clearable="true"
+              :behavior="$q.screen.lt.md ? 'dialog' : 'menu'"
+            />
           </div>
         </q-form>
       </div>
@@ -442,7 +462,9 @@ export default {
         timeshift_enabled: false,
         vod_access_mode: 'none',
         vod_generate_strm_files: false,
+        allowed_channel_tags: [],
       },
+      channelGroupOptions: [],
       roleOptions: [
         {label: 'Admin', value: 'admin'},
         {label: 'Streamer', value: 'streamer'},
@@ -703,9 +725,20 @@ export default {
         timeshift_enabled: false,
         vod_access_mode: 'none',
         vod_generate_strm_files: false,
+        allowed_channel_tags: [],
       };
+      this.loadChannelGroups();
       this.enforceVodSettingsConsistency();
       this.showCreate = true;
+    },
+    async loadChannelGroups() {
+      try {
+        const response = await axios.get('/tic-api/channels/tags');
+        const names = (response.data && response.data.data) || [];
+        this.channelGroupOptions = Array.isArray(names) ? names : [];
+      } catch {
+        this.channelGroupOptions = [];
+      }
     },
     onCreateDialogAction(action) {
       if (action.id === 'create') {
@@ -732,6 +765,7 @@ export default {
           vod_generate_strm_files: !isAdmin && this.form.vod_access_mode === 'none'
             ? false
             : !!this.form.vod_generate_strm_files,
+          allowed_channel_tags: isAdmin ? [] : (this.form.allowed_channel_tags || []),
         });
         this.showCreate = false;
         await this.loadUsers();
@@ -753,7 +787,9 @@ export default {
         timeshift_enabled: !!user.timeshift_enabled,
         vod_access_mode: isAdmin ? 'movies_series' : (user.vod_access_mode || 'none'),
         vod_generate_strm_files: !!user.vod_generate_strm_files,
+        allowed_channel_tags: [...(user.allowed_channel_tags || [])],
       };
+      this.loadChannelGroups();
       this.enforceVodSettingsConsistency();
       this.showEdit = true;
     },
@@ -780,6 +816,7 @@ export default {
           vod_generate_strm_files: !isAdmin && this.form.vod_access_mode === 'none'
             ? false
             : !!this.form.vod_generate_strm_files,
+          allowed_channel_tags: isAdmin ? [] : (this.form.allowed_channel_tags || []),
         });
         this.showEdit = false;
         await this.loadUsers();
@@ -904,6 +941,7 @@ export default {
   mounted() {
     this.usersSortDraft = {...this.usersSort};
     this.loadUsers();
+    this.loadChannelGroups();
   },
 };
 </script>
