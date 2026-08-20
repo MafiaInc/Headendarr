@@ -10,6 +10,7 @@ from backend.api.connections_common import (
     get_playlist_connection_count,
     resolve_channel_stream_url,
 )
+from backend.channel_access import allowed_channel_tag_names_for_username, channel_allowed
 from backend.auth import (
     audit_stream_event,
     get_request_stream_key,
@@ -77,7 +78,10 @@ async def _get_lineup_list(playlist_id, stream_username=None, stream_key=None, r
     config = current_app.config["APP_CONFIG"]
     base_url = get_request_base_url(request)
     lineup_list = []
+    allowed_tags = await allowed_channel_tag_names_for_username(stream_username)
     for channel_details in await get_channels_for_playlist(playlist_id):
+        if not channel_allowed(channel_details, allowed_tags):
+            continue
         channel_id = generate_epg_channel_id(channel_details["number"], channel_details["name"])
         channel_url, _, _ = await resolve_channel_stream_url(
             config=config,

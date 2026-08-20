@@ -23,6 +23,8 @@ from backend.auth import (
     skip_stream_connect_audit,
     stream_key_required,
 )
+from backend.channel_access import channel_id_allowed_for_username
+from backend.cso.subscriptions_shared import resolve_username_for_stream_key
 from backend.cso import (
     cso_capacity_registry,
     cso_session_manager,
@@ -708,6 +710,9 @@ async def stream_channel(channel_id):
         return Response("Invalid channel id", status=400)
 
     config = current_app.config["APP_CONFIG"]
+    stream_username = await resolve_username_for_stream_key(config, get_request_stream_key())
+    if not await channel_id_allowed_for_username(channel_id_int, stream_username):
+        return Response("Not found", status=404)
     requested_profile = (request.args.get("profile") or "").strip().lower()
     prebuffer_bytes = parse_size(request.args.get("prebuffer"), default=0)
     channel = await resolve_channel_for_stream(channel_id_int)
@@ -925,6 +930,9 @@ async def stream_channel_hls_playlist(channel_id: int, connection_id: str):
     stream_user = get_request_stream_user()
     stream_key = get_request_stream_key()
 
+    stream_username = await resolve_username_for_stream_key(config, stream_key)
+    if not await channel_id_allowed_for_username(int(channel_id), stream_username):
+        return Response("Not found", status=404)
     channel = await resolve_channel_for_stream(int(channel_id))
     if not channel or not bool(getattr(channel, "enabled", False)):
         return Response("Channel is disabled", status=404)
