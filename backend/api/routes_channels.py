@@ -33,7 +33,7 @@ from backend.streaming import build_local_hls_proxy_url, normalize_local_proxy_u
 from backend.url_resolver import get_request_base_url
 from backend.utils import fast_url_hash, parse_entity_id, is_truthy, to_utc_iso
 from backend.tvheadend.tvh_requests import get_tvh
-from backend.models import Session, Channel, ChannelSource, ChannelSuggestion, PlaylistStreams, CsoEventLog, Playlist
+from backend.models import Session, Channel, ChannelSource, ChannelSuggestion, ChannelTag, PlaylistStreams, CsoEventLog, Playlist
 from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
 from backend.vod_channels import is_vod_channel_type
@@ -1215,6 +1215,16 @@ async def api_get_channel_logo(channel_id, file_placeholder):
     image_io.seek(0)
     # Return file blob
     return await send_file(image_io, mimetype=mime_type)
+
+
+@blueprint.route("/tic-api/channels/tags", methods=["GET"])
+@admin_auth_required
+async def api_list_channel_tags():
+    """List the channel group (tag) names, e.g. for per-user channel-access selection."""
+    async with Session() as session:
+        result = await session.execute(select(ChannelTag).order_by(ChannelTag.name))
+        names = [tag.name for tag in result.scalars().all() if tag.name]
+    return jsonify({"success": True, "data": names})
 
 
 @blueprint.route("/tic-api/channels/settings/groups/add", methods=["POST"])
