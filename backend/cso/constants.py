@@ -1,8 +1,24 @@
+import os
 from pathlib import Path
 
 
 # Whether VOD playback should prefer a managed proxy session when direct upstream input is not in use.
 CS_VOD_USE_PROXY_SESSION = True
+
+
+# Startup budget for a live CSO output before it falls back to the failure slate.
+# Some upstreams (e.g. token-authorised provider CDNs) are slow to return the first
+# byte on a cold start, especially under concurrent load, so a short budget makes
+# valid-but-slow channels show the "Playback Issue Detected" slate on the first try.
+# Overridable via env for slow providers.
+CSO_LIVE_OUTPUT_STARTUP_TIMEOUT_SECONDS = float(
+    os.environ.get("CSO_LIVE_OUTPUT_STARTUP_TIMEOUT_SECONDS", "20") or 20
+)
+
+# Startup budget for a live CSO output that reads from a segmented (HLS) input target.
+CSO_SEGMENTED_OUTPUT_STARTUP_TIMEOUT_SECONDS = float(
+    os.environ.get("CSO_SEGMENTED_OUTPUT_STARTUP_TIMEOUT_SECONDS", "20") or 20
+)
 
 
 # How long a failed live source should be held down before it becomes eligible again.

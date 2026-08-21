@@ -20,10 +20,12 @@ from .constants import (
     CSO_HLS_CLIENT_IDLE_SECONDS,
     CSO_INGEST_RECOVERY_RETRY_INTERVAL_SECONDS,
     CSO_INGEST_SUBSCRIBER_PREBUFFER_BYTES,
+    CSO_LIVE_OUTPUT_STARTUP_TIMEOUT_SECONDS,
     CSO_OUTPUT_CLIENT_QUEUE_MAX_BYTES,
     CSO_OUTPUT_CLIENT_STALE_SECONDS,
     CSO_OUTPUT_CLIENT_STALE_SECONDS_TVH,
     CSO_OUTPUT_SLATE_POLL_INTERVAL_SECONDS,
+    CSO_SEGMENTED_OUTPUT_STARTUP_TIMEOUT_SECONDS,
 )
 from .events import emit_channel_stream_event, source_event_context
 from .ffmpeg import (
@@ -350,7 +352,11 @@ class CsoOutputSession:
                         read_task = asyncio.create_task(self._read_loop())
                         write_task = None if segmented_input_target else asyncio.create_task(self._write_loop())
                         stderr_task = asyncio.create_task(self._stderr_loop())
-                        startup_timeout_seconds = 20.0 if segmented_input_target else 8.0
+                        startup_timeout_seconds = (
+                            CSO_SEGMENTED_OUTPUT_STARTUP_TIMEOUT_SECONDS
+                            if segmented_input_target
+                            else CSO_LIVE_OUTPUT_STARTUP_TIMEOUT_SECONDS
+                        )
                         started, failure_reason = await self._wait_for_startup_ready(
                             process,
                             timeout_seconds=startup_timeout_seconds,
@@ -1273,7 +1279,7 @@ class CsoHlsOutputSession:
                     write_task = asyncio.create_task(self._write_loop(token, self.process))
                 stderr_task = asyncio.create_task(self._stderr_loop(token, self.process))
                 wait_task = asyncio.create_task(self._wait_loop(token, self.process))
-                startup_timeout_seconds = 8.0
+                startup_timeout_seconds = CSO_LIVE_OUTPUT_STARTUP_TIMEOUT_SECONDS
                 if use_direct_input:
                     startup_timeout_seconds = 20.0 if self.start_seconds > 0 else 12.0
                 started, failure_reason = await self._wait_for_startup_ready(
