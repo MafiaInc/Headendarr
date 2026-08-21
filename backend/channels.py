@@ -2680,6 +2680,20 @@ async def publish_channel_muxes(config):
     except ValueError as exc:
         logger.error("Skipping TVH mux publish: %s", exc)
         return
+
+    # Per-publish-cycle budget for mux scans (see TIC_TVH_MUX_SCAN_MAX_PER_CYCLE). Deferred
+    # muxes keep their pending scan and are picked up on a later publish cycle.
+    _scan_cap = int(getattr(app_config, "tvh_mux_scan_max_per_cycle", 0) or 0)
+    _scan_budget = {"remaining": _scan_cap}
+
+    def _take_scan_budget() -> bool:
+        if _scan_cap <= 0:
+            return True
+        if _scan_budget["remaining"] > 0:
+            _scan_budget["remaining"] -= 1
+            return True
+        return False
+
     async with await get_tvh(config) as tvh:
 
         def _is_partial_placeholder_mux(mux):
@@ -2867,7 +2881,7 @@ async def publish_channel_muxes(config):
                         "priority": source_obj.priority,
                         "spriority": source_obj.priority,
                     }
-                    if run_mux_scan and not app_config.tvh_skip_mux_scan:
+                    if run_mux_scan and not app_config.tvh_skip_mux_scan and _take_scan_budget():
                         mux_conf["scan_state"] = 1
                     try:
                         await tvh.idnode_save(mux_conf)
@@ -2935,7 +2949,7 @@ async def publish_channel_muxes(config):
                         "priority": "1",
                         "spriority": "1",
                     }
-                    if run_mux_scan and not app_config.tvh_skip_mux_scan:
+                    if run_mux_scan and not app_config.tvh_skip_mux_scan and _take_scan_budget():
                         mux_conf["scan_state"] = 1
                     try:
                         await tvh.idnode_save(mux_conf)
@@ -3003,7 +3017,7 @@ async def publish_channel_muxes(config):
                     "priority": "1",
                     "spriority": "1",
                 }
-                if run_mux_scan and not app_config.tvh_skip_mux_scan:
+                if run_mux_scan and not app_config.tvh_skip_mux_scan and _take_scan_budget():
                     mux_conf["scan_state"] = 1
                 try:
                     await tvh.idnode_save(mux_conf)
