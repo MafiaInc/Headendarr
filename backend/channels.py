@@ -1329,7 +1329,16 @@ def get_channel_image_path(config, channel_id):
     return os.path.join(config.config_path, "cache", "logos", f"channel_logo_{channel_id}")
 
 
-async def download_image_to_base64(image_source, timeout=10):
+# Timeout for server-side channel-logo fetches. The previous 3s cap was too short
+# for slow provider CDNs (e.g. cdn.tivi.bg takes ~4s to first byte), so valid logos
+# timed out and fell back to the placeholder with a "Failed to fetch logo" warning.
+# Overridable via env for slow providers.
+CHANNEL_LOGO_FETCH_TIMEOUT_SECONDS = float(
+    os.environ.get("TIC_LOGO_FETCH_TIMEOUT_SECONDS", "15") or 15
+)
+
+
+async def download_image_to_base64(image_source, timeout=CHANNEL_LOGO_FETCH_TIMEOUT_SECONDS):
     # Image source is a URL
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
@@ -1369,7 +1378,7 @@ async def parse_image_as_base64_with_status(image_source):
             status = "ok"
             error = None
         elif image_source.startswith("http://") or image_source.startswith("https://"):
-            image_base64_string, mime_type = await download_image_to_base64(image_source, timeout=3)
+            image_base64_string, mime_type = await download_image_to_base64(image_source)
             # download_image_to_base64 falls back to placeholder on failure; detect that.
             if image_base64_string == image_placeholder_base64:
                 status = "error"
