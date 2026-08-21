@@ -897,7 +897,7 @@ export default {
         stream_name: suggestion.stream_name,
         stream_url: suggestion.stream_url,
         use_hls_proxy: false,
-        auto_update: false,
+        auto_update: true,
         source_type: 'playlist',
         xc_account_id: null,
       }));
@@ -1556,7 +1556,7 @@ export default {
             stream_name: selectedStream.stream_name,
             stream_url: selectedStream.stream_url,
             use_hls_proxy: false,
-            auto_update: false,
+            auto_update: true,
           }));
         }
         this.listOfChannelSources = enabledStreams;

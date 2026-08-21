@@ -1547,7 +1547,7 @@ async def add_new_channel(config, data, commit=True):
                             xc_account_id=account.id,
                             playlist_stream_name=source_info["stream_name"],
                             playlist_stream_url=stream_url,
-                            auto_update=bool(source_info.get("auto_update", False)),
+                            auto_update=bool(source_info.get("auto_update", True)),
                             priority=int(priority),
                         )
                     )
@@ -1563,7 +1563,7 @@ async def add_new_channel(config, data, commit=True):
                         playlist_id=playlist_info.id,
                         playlist_stream_name=source_info["stream_name"],
                         playlist_stream_url=stream_url,
-                        auto_update=bool(source_info.get("auto_update", False)),
+                        auto_update=bool(source_info.get("auto_update", True)),
                         priority=int(priority),
                     )
                 )
@@ -1983,7 +1983,7 @@ async def update_channel(config, channel_id, data):
                             playlist_id=playlist_info.id,
                             playlist_stream_name=source_info["stream_name"],
                             playlist_stream_url=playlist_stream["url"],
-                            auto_update=bool(source_info.get("auto_update", False)),
+                            auto_update=bool(source_info.get("auto_update", True)),
                         )
                     else:
                         logger.info(
