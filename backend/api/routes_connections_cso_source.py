@@ -576,6 +576,14 @@ async def stream_from_source_gate(stream_id):
     effective_policy = generate_cso_policy_from_profile(config, effective_profile)
     use_hls_output = str(effective_policy.get("container") or "").strip().lower() == "hls"
 
+    if request.method == "HEAD":
+        # Probe clients (e.g. Jellyfin/ffmpeg) send HEAD before streaming. Return headers
+        # only — do NOT start ingest, consume a capacity slot, or mark the stream active,
+        # otherwise the probe starts a real (and slow-to-start) stream that hangs the probe
+        # and blocks the follow-up GET from acquiring the source connection slot.
+        head_content_type = "application/vnd.apple.mpegurl" if use_hls_output else "video/mp2t"
+        return Response(b"", status=200, content_type=head_content_type)
+
     connection_id = _get_connection_id()
     if connection_id == "tvh":
         connection_id = f"tvh-{uuid.uuid4().hex}"
@@ -719,6 +727,13 @@ async def stream_channel(channel_id):
     )
     effective_policy = generate_cso_policy_from_profile(config, effective_profile)
     use_hls_output = str(effective_policy.get("container") or "").strip().lower() == "hls"
+
+    if request.method == "HEAD":
+        # Probe clients (e.g. Jellyfin/ffmpeg) send HEAD before streaming. Return headers
+        # only — do NOT start ingest or mark the stream active. See the matching guard in
+        # stream_from_source_gate.
+        head_content_type = "application/vnd.apple.mpegurl" if use_hls_output else "video/mp2t"
+        return Response(b"", status=200, content_type=head_content_type)
 
     connection_id = _get_connection_id()
     if connection_id == "tvh":
