@@ -2858,7 +2858,7 @@ async def publish_channel_muxes(config):
                         "priority": source_obj.priority,
                         "spriority": source_obj.priority,
                     }
-                    if run_mux_scan:
+                    if run_mux_scan and not app_config.tvh_skip_mux_scan:
                         mux_conf["scan_state"] = 1
                     try:
                         await tvh.idnode_save(mux_conf)
@@ -2926,7 +2926,7 @@ async def publish_channel_muxes(config):
                         "priority": "1",
                         "spriority": "1",
                     }
-                    if run_mux_scan:
+                    if run_mux_scan and not app_config.tvh_skip_mux_scan:
                         mux_conf["scan_state"] = 1
                     try:
                         await tvh.idnode_save(mux_conf)
@@ -2994,7 +2994,7 @@ async def publish_channel_muxes(config):
                     "priority": "1",
                     "spriority": "1",
                 }
-                if run_mux_scan:
+                if run_mux_scan and not app_config.tvh_skip_mux_scan:
                     mux_conf["scan_state"] = 1
                 try:
                     await tvh.idnode_save(mux_conf)
