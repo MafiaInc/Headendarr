@@ -508,6 +508,12 @@ flask_run_host = _env_str("FLASK_RUN_HOST", "0.0.0.0")
 flask_run_port = _env_int("FLASK_RUN_PORT", 9985)
 trust_proxy_headers = _env_bool("TIC_TRUST_PROXY_HEADERS", False)
 trusted_proxy_cidrs = _env_str("TIC_TRUSTED_PROXY_CIDRS", "")
+# When true, Headendarr never triggers a TVHeadend mux scan (scan_state=1) on publish.
+# TVHeadend scans muxes to detect services; for setups that stream via the direct CSO
+# endpoints (not TVHeadend/HTSP), the scan is unnecessary and, against a rate-limited
+# upstream, a burst of new-mux scans can exhaust the provider's connection limit. Muxes
+# whose scan failed (scan_result=2) would otherwise be re-scanned on every publish.
+tvh_skip_mux_scan = _env_bool("TIC_TVH_SKIP_MUX_SCAN", False)
 
 auth_rate_limit_enabled = _env_bool("TIC_AUTH_RATE_LIMIT_ENABLED", True)
 
