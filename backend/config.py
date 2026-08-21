@@ -514,6 +514,13 @@ trusted_proxy_cidrs = _env_str("TIC_TRUSTED_PROXY_CIDRS", "")
 # upstream, a burst of new-mux scans can exhaust the provider's connection limit. Muxes
 # whose scan failed (scan_result=2) would otherwise be re-scanned on every publish.
 tvh_skip_mux_scan = _env_bool("TIC_TVH_SKIP_MUX_SCAN", False)
+# Cap how many TVHeadend mux scans Headendarr requests per publish cycle. 0 = unlimited
+# (default). A bulk channel-add (or a batch of previously-failed muxes) otherwise sets
+# scan_state on all of them at once, which against a rate-limited upstream saturates the
+# provider's connection limit and starves live playback. With a cap, only that many muxes
+# scan per cycle and the rest are deferred to later publishes, so scans trickle in without
+# storming. Set this a couple below the upstream connection limit to leave room for viewers.
+tvh_mux_scan_max_per_cycle = _env_int("TIC_TVH_MUX_SCAN_MAX_PER_CYCLE", 0)
 
 auth_rate_limit_enabled = _env_bool("TIC_AUTH_RATE_LIMIT_ENABLED", True)
 
