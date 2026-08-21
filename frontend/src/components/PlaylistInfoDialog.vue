@@ -226,6 +226,9 @@ import TicToggleInput from 'components/ui/inputs/TicToggleInput.vue';
 import TicSelectInput from 'components/ui/inputs/TicSelectInput.vue';
 
 const PLAYLIST_UPDATE_SCHEDULE_OPTIONS = [
+  {label: '10 Minutes', value: '10m'},
+  {label: '15 Minutes', value: '15m'},
+  {label: '30 Minutes', value: '30m'},
   {label: '1 Hour', value: '1h'},
   {label: '2 Hours', value: '2h'},
   {label: '3 Hours', value: '3h'},
